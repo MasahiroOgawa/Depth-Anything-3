@@ -240,6 +240,54 @@ TAPVID3D RGB if `~/data/tapvid3d/{subset}/{clip-id}.npz` is reachable
 Render speed on the validated box: ~30 ms/frame, so a 150-frame PStudio
 clip renders in ~4 s.
 
+### 5.4 Interactive 4D viewing (rotate + zoom + scrub time)
+
+The MP4 above is a fixed-viewpoint render — useful for sharing but you
+can't rotate the scene to confirm the 3D structure. For genuinely
+interactive 4D inspection, export the clip to a **Rerun** `.rrd` file
+and open it with the Rerun viewer:
+
+```bash
+# On the GPU box, export a clip
+.venv/bin/python scripts/export_4d_to_rerun.py \
+    --clip-dir /home/mas/data/tapvid3d_da3_out/pstudio/tennis_23
+# writes <clip-dir>/4d.rrd  (~200 MB for a 150-frame PStudio clip)
+```
+
+The .rrd contains, per frame: the world-space point cloud (RGB-colored
+when the source npz is reachable), the camera frustum, the camera's
+intrinsics+extrinsics, and the original RGB image projected through the
+frustum.
+
+**Option A — download the `.rrd` and view locally (simplest)**:
+
+```bash
+# On your laptop
+brew install rerun-io/rerun/rerun     # or pip install rerun-sdk
+rsync -avz mas-galleria:/home/mas/data/tapvid3d_da3_out/pstudio/tennis_23/4d.rrd ~/Downloads/
+rerun ~/Downloads/4d.rrd
+```
+
+Drag the 3D view with mouse to rotate, scroll to zoom, drag the time
+slider at the bottom to scrub frames.
+
+**Option B — stream live over an SSH tunnel** (no large file copy):
+
+```bash
+# On the GPU box
+.venv/bin/python scripts/export_4d_to_rerun.py \
+    --clip-dir /home/mas/data/tapvid3d_da3_out/pstudio/tennis_23 --serve
+# Keeps running; serves on port 9876
+```
+
+```bash
+# On your laptop — tunnel + connect
+ssh -L 9876:localhost:9876 mas-galleria  # in one terminal, keep open
+rerun --connect rerun+http://localhost:9876/proxy  # in another
+```
+
+### 5.5 Quick depth-only MP4 (no 3D)
+
 For a quick MP4 of just the depth maps over time (no 3D rendering),
 ffmpeg the existing `depth_vis/` PNGs directly:
 
