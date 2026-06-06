@@ -217,6 +217,41 @@ the GPU host with `pkill -f "depth_anything_3.cli gallery"`.
 Blender (`File → Import → glTF 2.0`), or VS Code's "glTF Tools" extension
 for offline viewing without the gallery server.
 
+### 5.3 True 4D playback (time-varying point cloud → MP4)
+
+`scene.glb` is time-aggregated — points from every frame fused into one
+static cloud. To see the scene *evolve over time* from a fixed viewpoint,
+render a per-frame point cloud animation:
+
+```bash
+.venv/bin/python scripts/render_4d_animation.py \
+    --clip-dir /home/mas/data/tapvid3d_da3_out/pstudio/tennis_23
+# writes <clip-dir>/4d.mp4
+```
+
+The renderer unprojects `depth[t]` to world space using `extrinsics[t]` and
+`intrinsics[t]`, applies a per-frame confidence threshold (40th percentile)
+to drop noisy points, computes a single oblique camera from the aggregate
+scene bbox, and emits an MP4 (default 960×720 @ 24 fps) using Open3D's EGL
+headless `OffscreenRenderer`. Each frame is colored with the original
+TAPVID3D RGB if `~/data/tapvid3d/{subset}/{clip-id}.npz` is reachable
+(default); pass `--no-rgb` to fall back to a depth colormap.
+
+Render speed on the validated box: ~30 ms/frame, so a 150-frame PStudio
+clip renders in ~4 s.
+
+For a quick MP4 of just the depth maps over time (no 3D rendering),
+ffmpeg the existing `depth_vis/` PNGs directly:
+
+```bash
+.venv/bin/python -c "
+import imageio.v2 as iio, glob
+frames = sorted(glob.glob('/home/mas/data/tapvid3d_da3_out/pstudio/tennis_23/depth_vis/*.jpg'))
+with iio.get_writer('depth.mp4', fps=24) as w:
+    for f in frames: w.append_data(iio.imread(f))
+"
+```
+
 ## 6. Outputs reference
 
 ```
