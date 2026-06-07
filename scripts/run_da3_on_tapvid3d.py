@@ -30,7 +30,9 @@ from depth_anything_3.api import DepthAnything3
 LOG = logging.getLogger("da3_tapvid3d")
 
 DEFAULT_MODEL = "depth-anything/DA3-LARGE-1.1"
+DEFAULT_GS_MODEL = "depth-anything/DA3NESTED-GIANT-LARGE"
 DEFAULT_EXPORT_FORMAT = "glb-mini_npz"
+DEFAULT_GS_EXPORT_FORMAT = "glb-mini_npz-gs_ply"
 
 
 def decode_clip_frames(npz_path: Path, frames_dir: Path) -> list[str]:
@@ -53,6 +55,8 @@ def process_clip(
     out_root: Path,
     tmp_root: Path,
     export_format: str,
+    infer_gs: bool,
+    process_res: int,
 ) -> tuple[bool, str]:
     clip_id = npz_path.stem
     subset = npz_path.parent.name
@@ -70,6 +74,8 @@ def process_clip(
             frame_paths,
             export_dir=str(out_dir),
             export_format=export_format,
+            infer_gs=infer_gs,
+            process_res=process_res,
         )
         np.savez_compressed(
             out_dir / "depth.npz",
@@ -97,10 +103,25 @@ def main() -> int:
     p.add_argument("--output-root", default=os.path.expanduser("~/data/tapvid3d_da3_out"))
     p.add_argument("--tmp-root", default=os.path.expanduser("~/data/tapvid3d_tmp"))
     p.add_argument("--subsets", nargs="+", default=["drivetrack", "pstudio", "adt"])
-    p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--export-format", default=DEFAULT_EXPORT_FORMAT)
+    p.add_argument("--model", default=None, help="Default: LARGE, or GIANT if --infer-gs is set")
+    p.add_argument("--export-format", default=None)
     p.add_argument("--limit", type=int, default=None, help="Cap clips per subset (debug)")
+    p.add_argument(
+        "--infer-gs",
+        action="store_true",
+        help="Predict 3D Gaussians; switches to GIANT model and adds gs_ply to export",
+    )
+    p.add_argument(
+        "--process-res",
+        type=int,
+        default=504,
+        help="Model processing resolution; lower for OOM-prone clips (e.g. 392)",
+    )
     args = p.parse_args()
+    if args.model is None:
+        args.model = DEFAULT_GS_MODEL if args.infer_gs else DEFAULT_MODEL
+    if args.export_format is None:
+        args.export_format = DEFAULT_GS_EXPORT_FORMAT if args.infer_gs else DEFAULT_EXPORT_FORMAT
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -137,7 +158,15 @@ def main() -> int:
     with torch.inference_mode():
         for i, clip in enumerate(clips, 1):
             t = time.time()
-            ok, msg = process_clip(model, clip, out_root, tmp_root, args.export_format)
+            ok, msg = process_clip(
+                model,
+                clip,
+                out_root,
+                tmp_root,
+                args.export_format,
+                args.infer_gs,
+                args.process_res,
+            )
             dt = time.time() - t
             tag = "OK " if ok else "ERR"
             LOG.info("[%d/%d] %s %s (%.1fs) %s", i, len(clips), tag, clip.name, dt, msg)

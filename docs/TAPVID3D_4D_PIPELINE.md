@@ -74,6 +74,28 @@ uv pip install -e ".[gs]" --no-build-isolation
 
 Skip this section if you only need depth + poses + point clouds.
 
+**The validated install on this box used the venv-local CUDA 13 toolkit
+when the system `nvcc` was 12.4 (the typical Ubuntu `nvidia-cuda-toolkit`
+package) — that's a version mismatch against torch's cu130 build and
+fails. The fix is to provide a matching CUDA 13 nvcc via uv:**
+
+```bash
+uv pip install nvidia-cuda-nvcc        # ships nvcc inside the venv
+
+export CUDA_HOME=$PWD/.venv/lib/python3.12/site-packages/nvidia/cu13
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib:$LD_LIBRARY_PATH
+
+# Torch's cpp_extension calls `gcc`/`g++`/`cc`/`c++` directly. On Ubuntu
+# 26.04 only `gcc-13`/`g++-13` are present; shim them onto PATH.
+mkdir -p /tmp/gcc-shim
+for c in gcc cc; do ln -sf /usr/bin/gcc-13 /tmp/gcc-shim/$c; done
+for c in g++ c++; do ln -sf /usr/bin/g++-13 /tmp/gcc-shim/$c; done
+export PATH=/tmp/gcc-shim:$PATH
+
+uv pip install -e ".[gs]" --no-build-isolation
+```
+
 ## 2. Download TAPVID3D minival
 
 TAPVID3D has three subsets — Aria (ADT), DriveTrack, Panoptic Studio. Use a
@@ -144,15 +166,32 @@ The driver:
    run continues. Re-running the driver skips clips with a `done.flag`.
 
 Default model: `depth-anything/DA3-LARGE-1.1` (0.35B params, fits in 16 GB
-for clips up to ~130 frames at 504 px). To switch:
+for clips up to ~130 frames at 504 px). Useful flags:
 
-```bash
-.venv/bin/python scripts/run_da3_on_tapvid3d.py \
-    --model depth-anything/DA3NESTED-GIANT-LARGE
-```
+- `--model <id>` — override the default; GIANT auto-selected when
+  `--infer-gs` is set.
+- `--infer-gs` — turn on the 3D-Gaussian branch and add `gs_ply` to the
+  export. **Requires the `[gs]` extra installed** (see §1.5). Auto-switches
+  the model to `DA3NESTED-GIANT-LARGE`.
+- `--process-res 392` — drop the model's processing resolution below the
+  default 504 to fit longer clips into 16 GB VRAM. Required in practice
+  for GIANT+GS on this card (use `--process-res 280` for 150-frame
+  PStudio clips on 16 GB).
+- `--limit N` — cap clips per subset; useful for one-clip GS smoke tests.
 
-Note: GIANT only meaningfully helps if you've installed `[gs]` (Gaussian
-Splats); otherwise LARGE is the better quality/throughput trade.
+Re-running the driver is idempotent: the per-clip `done.flag` skips
+already-processed clips. So after the original LARGE pass, dropping
+`--process-res 392` on the same `--output-root` only re-runs the OOM
+clips. A different `--output-root` (e.g. `~/data/tapvid3d_da3_out_gs/`)
+is recommended when switching to `--infer-gs` so the two output sets
+stay separate.
+
+#### Validated runs (RTX 5060 Ti, 16 GB)
+
+| Mode | Model | `--process-res` | Output dir | Per-clip artifacts | OOM rate |
+|---|---|---|---|---|---|
+| Depth + poses | LARGE | 504 (default) | `tapvid3d_da3_out/` | `depth.npz`, `scene.glb`, `depth_vis/` | 1/100 (one 162-frame clip — retry at 392 to recover) |
+| Depth + poses + **4D Gaussian Splats** | GIANT | 280 | `tapvid3d_da3_out_gs/` | Above + `gs_ply/0000.ply` (4–5 M Gaussians) + `gs_video/0000_extend.mp4` | 3/100 (long DriveTrack clips) |
 
 ## 4. Verify outputs
 
